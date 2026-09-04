@@ -32,6 +32,13 @@ function initSocket(httpServer) {
     socket.on("leaveTournament", (tournamentId) => {
       socket.leave(`tournament:${tournamentId}`);
     });
+
+    // A logged-in client joins its own room so wallet updates (which
+    // aren't tied to any particular tournament) can be pushed to just
+    // that user.
+    socket.on("joinUser", (userId) => {
+      socket.join(`user:${userId}`);
+    });
   });
 
   return io;
