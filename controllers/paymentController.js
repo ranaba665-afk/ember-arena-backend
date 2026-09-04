@@ -24,6 +24,8 @@ const Razorpay = require("razorpay");
 
 const Tournament = require("../models/Tournament");
 const Booking = require("../models/Booking");
+const User = require("../models/User");
+const Transaction = require("../models/Transaction");
 const { getIO } = require("../socket");
 
 const razorpay = new Razorpay({
@@ -142,30 +144,46 @@ exports.razorpayWebhook = async (req, res) => {
   try {
     if (event === "payment.captured") {
       const payment = payload.payload.payment.entity;
-      const bookingId = payment.notes?.bookingId;
 
-      const booking = await Booking.findByIdAndUpdate(
-        bookingId,
-        {
-          paymentStatus: "paid",
-          "payment.razorpayPaymentId": payment.id,
-          "payment.method": payment.method, // "upi", "card", etc.
-        },
-        { new: true }
-      );
+      // Wallet top-ups and tournament bookings both create Razorpay
+      // orders, so the webhook branches on the `type` note set at
+      // order-creation time to know which one this payment belongs to.
+      if (payment.notes?.type === "wallet_topup") {
+        await creditWalletTopUp(payment);
+      } else {
+        const bookingId = payment.notes?.bookingId;
 
-      if (booking) {
-        getIO().to(`tournament:${booking.tournament}`).emit("paymentConfirmed", {
-          bookingId: booking._id,
-          tournamentId: booking.tournament,
-        });
+        const booking = await Booking.findByIdAndUpdate(
+          bookingId,
+          {
+            paymentStatus: "paid",
+            "payment.razorpayPaymentId": payment.id,
+            "payment.method": payment.method, // "upi", "card", etc.
+          },
+          { new: true }
+        );
+
+        if (booking) {
+          getIO().to(`tournament:${booking.tournament}`).emit("paymentConfirmed", {
+            bookingId: booking._id,
+            tournamentId: booking.tournament,
+          });
+        }
       }
     }
 
     if (event === "payment.failed") {
       const payment = payload.payload.payment.entity;
-      const bookingId = payment.notes?.bookingId;
-      await releaseFailedBooking(bookingId);
+
+      if (payment.notes?.type === "wallet_topup") {
+        await Transaction.findOneAndUpdate(
+          { razorpayOrderId: payment.order_id, status: "pending" },
+          { status: "failed" }
+        );
+      } else {
+        const bookingId = payment.notes?.bookingId;
+        await releaseFailedBooking(bookingId);
+      }
     }
 
     // Razorpay expects a 200 quickly, or it will retry the webhook.
@@ -178,6 +196,37 @@ exports.razorpayWebhook = async (req, res) => {
     return res.status(500).json({ success: false });
   }
 };
+
+async function creditWalletTopUp(payment) {
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const tx = await Transaction.findOne({
+        razorpayOrderId: payment.order_id,
+        status: "pending",
+      }).session(session);
+
+      if (!tx) return; // already processed, or not found — don't double-credit
+
+      const updatedUser = await User.findByIdAndUpdate(
+        tx.user,
+        { $inc: { "wallet.balance": tx.amount } },
+        { new: true, session }
+      );
+
+      tx.status = "success";
+      tx.balanceAfter = updatedUser.wallet.balance;
+      tx.razorpayPaymentId = payment.id;
+      await tx.save({ session });
+
+      getIO().to(`user:${tx.user}`).emit("walletUpdated", {
+        balance: updatedUser.wallet.balance,
+      });
+    });
+  } finally {
+    session.endSession();
+  }
+}
 
 async function releaseFailedBooking(bookingId) {
   const session = await mongoose.startSession();
@@ -217,5 +266,6 @@ async function broadcastSlotCount(tournamentId) {
   } catch (err) {
     console.error("slotUpdated emit failed:", err);
   }
-    }
+}
 
+exports.broadcastSlotCount = broadcastSlotCount;
