@@ -23,7 +23,12 @@ exports.register = async (req, res) => {
     const user = await User.create({
       name,
       email,
-      phone,
+      // Empty string would still hit the unique index (MongoDB treats
+      // "" as a real value, not "no value"), so the second user who
+      // leaves phone blank gets a duplicate-key error. Normalizing to
+      // undefined lets the sparse index skip it entirely, the way an
+      // omitted optional field should behave.
+      phone: phone || undefined,
       password: hashed,
       gameId,
       ign,
@@ -73,4 +78,3 @@ exports.login = async (req, res) => {
     return res.status(500).json({ success: false, message: "Login failed, please try again." });
   }
 };
-
