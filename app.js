@@ -13,6 +13,7 @@ const tournamentRoutes = require("./routes/tournamentRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const walletRoutes = require("./routes/walletRoutes");
 const { razorpayWebhook } = require("./controllers/paymentController");
 
 const app = express();
@@ -47,6 +48,7 @@ app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/wallet", walletRoutes);
 
 // ---- 404 fallback ----
 app.use((req, res) => {
