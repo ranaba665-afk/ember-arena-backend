@@ -60,6 +60,14 @@ const tournamentSchema = new mongoose.Schema(
       winnerTeam: { type: String, default: null },
       announced: { type: Boolean, default: false },
       announcedAt: { type: Date, default: null },
+      // Payout = crediting the prize pool to the winner's in-app
+      // wallet (there's no bank-transfer integration set up).
+      payoutStatus: {
+        type: String,
+        enum: ["not_applicable", "pending", "paid"],
+        default: "not_applicable",
+      },
+      payoutAt: { type: Date, default: null },
     },
   },
   { timestamps: true }
